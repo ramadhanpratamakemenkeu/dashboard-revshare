@@ -181,7 +181,6 @@ def generate_ppt_kblb_pemda(df_hasil, pemda_name):
         else:
             cell.fill.fore_color.rgb = RGBColor(255, 255, 255)
 
-    # Header Row 1
     style_cell(table.cell(0, 0), "Jenis DBH", is_header=True, align=PP_ALIGN.CENTER)
     table.cell(0, 0).merge(table.cell(1, 0))
     
@@ -191,7 +190,6 @@ def generate_ppt_kblb_pemda(df_hasil, pemda_name):
     style_cell(table.cell(0, 4), "Lebih Bayar (LB)", is_header=True, align=PP_ALIGN.CENTER)
     table.cell(0, 4).merge(table.cell(0, 6))
     
-    # Header Row 2
     style_cell(table.cell(1, 1), "Sisa KB s.d. TA 2023", is_header=True, align=PP_ALIGN.CENTER)
     style_cell(table.cell(1, 2), "KB TA 2024", is_header=True, align=PP_ALIGN.CENTER)
     style_cell(table.cell(1, 3), "KB s.d. TA 2024", is_header=True, align=PP_ALIGN.CENTER)
@@ -199,7 +197,6 @@ def generate_ppt_kblb_pemda(df_hasil, pemda_name):
     style_cell(table.cell(1, 5), "LB TA 2024", is_header=True, align=PP_ALIGN.CENTER)
     style_cell(table.cell(1, 6), "LB s.d. TA 2024", is_header=True, align=PP_ALIGN.CENTER)
     
-    # Data
     for r_idx, row_data in df_hasil.iterrows():
         excel_row = r_idx + 2
         is_parent = row_data.get('is_parent', False)
@@ -274,9 +271,9 @@ with tab2:
             with st.expander("⚙️ Pengaturan Teks Transaksi KB/LB"):
                 opsi_ket = sorted(df_prov['keterangan'].dropna().unique())
                 def_kb23 = next((k for k in opsi_ket if 'Sisa KB s.d. TA 2023 KMK 198' in k), opsi_ket[0] if opsi_ket else "")
-                def_kb24 = next((k for k in opsi_ket if 'Penyaluran KB TA 2024 KMK 198' in k), opsi_ket[0] if opsi_ket else "")
+                def_kb24 = next((k for k in opsi_ket if 'Penetapan KB TA 2024 PMK 120' in k), opsi_ket[0] if opsi_ket else "")
                 def_lb23 = next((k for k in opsi_ket if 'Sisa LB s.d. TA 2023 KMK 44' in k), opsi_ket[0] if opsi_ket else "")
-                def_lb24 = next((k for k in opsi_ket if 'Penetapan LB TA 2024' in k or 'Sisa LB s.d. TA 2024 KMK 198' in k), opsi_ket[0] if opsi_ket else "")
+                def_lb24 = next((k for k in opsi_ket if 'Penetapan LB TA 2024 PMK 120' in k or 'Sisa LB s.d. TA 2024 KMK 198' in k), opsi_ket[0] if opsi_ket else "")
 
                 c1, c2, c3, c4 = st.columns(4)
                 ket_kb23 = c1.selectbox("SiSA KB s.d. TA 2023", opsi_ket, index=opsi_ket.index(def_kb23) if def_kb23 in opsi_ket else 0)
@@ -334,11 +331,21 @@ with tab2:
         if df_pemda.empty:
             st.warning("Data tidak ditemukan.")
         else:
-            # Mapping teks spesifik sesuai KMK 198 (sesuai gambar)
-            KET_KB_2023 = 'Sisa KB s.d. TA 2023 KMK 198/2026'
-            KET_KB_2024 = 'Penyaluran KB TA 2024 KMK 198/2026'
-            KET_LB_2023 = 'Sisa LB s.d. TA 2023 KMK 198/2026'
-            KET_LB_2024 = 'Penetapan LB TA 2024 PMK 120/2025' 
+            # Tambahkan Pengaturan Dropdown agar Anda bisa memilih teks yang tepat
+            with st.expander("⚙️ Pengaturan Teks Transaksi (Klik untuk menyesuaikan)"):
+                opsi_ket = sorted(df_pemda['keterangan'].dropna().unique())
+                
+                # Tebakan otomatis berdasarkan list teks Anda
+                def_kb23 = next((k for k in opsi_ket if 'Sisa KB s.d. TA 2023 KMK 198' in k), opsi_ket[0] if opsi_ket else "")
+                def_kb24 = next((k for k in opsi_ket if 'Penetapan KB TA 2024 PMK 120' in k), opsi_ket[0] if opsi_ket else "")
+                def_lb23 = next((k for k in opsi_ket if 'Sisa LB s.d. TA 2023 KMK 198' in k), opsi_ket[0] if opsi_ket else "")
+                def_lb24 = next((k for k in opsi_ket if 'Penetapan LB TA 2024 PMK 120' in k), opsi_ket[0] if opsi_ket else "")
+
+                c1, c2, c3, c4 = st.columns(4)
+                KET_KB_2023 = c1.selectbox("Sisa KB s.d. TA 2023", opsi_ket, index=opsi_ket.index(def_kb23) if def_kb23 in opsi_ket else 0)
+                KET_KB_2024 = c2.selectbox("KB TA 2024", opsi_ket, index=opsi_ket.index(def_kb24) if def_kb24 in opsi_ket else 0)
+                KET_LB_2023 = c3.selectbox("Sisa LB s.d. TA 2023", opsi_ket, index=opsi_ket.index(def_lb23) if def_lb23 in opsi_ket else 0)
+                KET_LB_2024 = c4.selectbox("LB TA 2024", opsi_ket, index=opsi_ket.index(def_lb24) if def_lb24 in opsi_ket else 0)
 
             def get_val(l1=None, l2=None, ket=None):
                 d = df_pemda
