@@ -3,6 +3,7 @@ import pandas as pd
 import sqlite3
 import plotly.express as px
 import numpy as np
+import streamlit.components.v1 as components
 from pptx import Presentation
 from pptx.util import Inches, Pt
 from pptx.dml.color import RGBColor
@@ -11,6 +12,7 @@ from fpdf import FPDF
 import os
 import gzip
 import shutil
+import io
 
 # ==========================================
 # 1. KONFIGURASI HALAMAN & UI/UX
@@ -45,12 +47,19 @@ if not os.path.exists(DB):
 if 'data_updated' not in st.session_state:
     @st.cache_data(show_spinner="Memuat data...")
     def load_data():
-        # PERBAIKAN: Tambahkan level1, level2, level3, uraian4 ke dalam list cols
-        cols = ['tahun','siklus','namaprovinsi','pemda', 'level0','level1','level2','level3','uraian4','keterangan', 'nilai']
         conn = sqlite3.connect(DB)
-        df = pd.read_sql_query(f"SELECT {','.join(cols)} FROM database_utama", conn)
+        # Mengambil SEMUA kolom untuk mencegah KeyError
+        df = pd.read_sql_query("SELECT * FROM database_utama", conn)
         conn.close()
+        
+        # PENGAMAN: Pastikan semua kolom yang dibutuhkan aplikasi tersedia
+        required_cols = ['tahun', 'siklus', 'namaprovinsi', 'pemda', 'level0', 'level1', 'level2', 'level3', 'uraian4', 'keterangan', 'nilai']
+        for col in required_cols:
+            if col not in df.columns:
+                df[col] = "" # Buat kolom kosong jika tidak ada di database
+                
         df['tahun'] = pd.to_numeric(df['tahun'], errors='coerce').fillna(0).astype(int)
+        df['nilai'] = pd.to_numeric(df['nilai'], errors='coerce').fillna(0)
         return df
     st.session_state['data_updated'] = load_data()
 
@@ -238,7 +247,7 @@ with tab2:
             html += f"<td>{hasil['KB_2023'].sum():,.0f}</td><td>{hasil['KB_2024'].sum():,.0f}</td><td>{hasil['KB_Total'].sum():,.0f}</td>"
             html += f"<td>{hasil['LB_2023'].sum():,.0f}</td><td>{hasil['LB_2024'].sum():,.0f}</td><td>{hasil['LB_Total'].sum():,.0f}</td></tr></tbody></table>"
             
-            st.html(html)
+            components.html(html, height=800, scrolling=True)
 
     # -- SUB TAB 2: Pemda/Jenis --
     with sub_tab2:
@@ -310,7 +319,7 @@ with tab2:
                     html_kblb += "</tr>"
                 html_kblb += "</tbody></table>"
                 
-                st.html(html_kblb)
+                components.html(html_kblb, height=600, scrolling=True)
                 
                 pdf_bytes = generate_pdf_kblb(df_hasil_pemda, pilih_pemda, df_hasil_pemda['jenis_db'].tolist())
                 st.download_button(
@@ -421,7 +430,7 @@ with tab3:
             html += "</tr>"
         html += "</tbody></table>"
         
-        st.html(html)
+        components.html(html, height=600, scrolling=True)
         
         st.markdown("### 📥 Export Laporan ke PowerPoint")
         if st.button("Buat Slide PowerPoint (.pptx)"):
