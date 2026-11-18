@@ -115,9 +115,9 @@ def generate_pdf_kblb(df_pivot, pemda_name, list_jenis):
     pdf.add_page()
     
     pdf.set_font("Helvetica", style="B", size=16)
-    pdf.cell(0, 10, f"SISA KB dan SISA LB DBH {pemda_name.upper()}", ln=True, align="C")
+    pdf.cell(0, 10, f"SISA KB dan SISA LB DBH {pemda_name.upper()}", new_x="LMARGIN", new_y="NEXT", align="C")
     pdf.set_font("Helvetica", size=10)
-    pdf.cell(0, 5, "(dalam rupiah)", ln=True, align="R")
+    pdf.cell(0, 5, "(dalam rupiah)", new_x="LMARGIN", new_y="NEXT", align="R")
     pdf.ln(5)
     
     col_widths = [60, 30, 30, 30, 30, 30, 30]
@@ -140,7 +140,8 @@ def generate_pdf_kblb(df_pivot, pemda_name, list_jenis):
         pdf.cell(col_widths[6], 8, f"{row['LB_Total']:,.0f}", border=1, align="R")
         pdf.ln()
         
-    return pdf.output(dest='S').encode('latin-1')
+    # PERBAIKAN: Menggunakan bytes() bukan .encode()
+    return bytes(pdf.output())
 
 # ==========================================
 # 4. TABS
