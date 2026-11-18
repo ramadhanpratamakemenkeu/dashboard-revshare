@@ -3,8 +3,6 @@ import pandas as pd
 import sqlite3
 import plotly.express as px
 import numpy as np
-import streamlit.components.v1 as components
-import io
 from pptx import Presentation
 from pptx.util import Inches, Pt
 from pptx.dml.color import RGBColor
@@ -47,8 +45,10 @@ if not os.path.exists(DB):
 if 'data_updated' not in st.session_state:
     @st.cache_data(show_spinner="Memuat data...")
     def load_data():
+        # PERBAIKAN: Tambahkan level1, level2, level3, uraian4 ke dalam list cols
+        cols = ['tahun','siklus','namaprovinsi','pemda', 'level0','level1','level2','level3','uraian4','keterangan', 'nilai']
         conn = sqlite3.connect(DB)
-        df = pd.read_sql_query("SELECT * FROM database_utama", conn)
+        df = pd.read_sql_query(f"SELECT {','.join(cols)} FROM database_utama", conn)
         conn.close()
         df['tahun'] = pd.to_numeric(df['tahun'], errors='coerce').fillna(0).astype(int)
         return df
@@ -105,24 +105,21 @@ def generate_pdf_kblb(df_pivot, pemda_name, list_jenis):
     pdf = FPDF(orientation='L', unit='mm', format='A4')
     pdf.add_page()
     
-    # Judul
     pdf.set_font("Helvetica", style="B", size=16)
     pdf.cell(0, 10, f"SISA KB dan SISA LB DBH {pemda_name.upper()}", ln=True, align="C")
     pdf.set_font("Helvetica", size=10)
     pdf.cell(0, 5, "(dalam rupiah)", ln=True, align="R")
     pdf.ln(5)
     
-    # Header Tabel
     col_widths = [60, 30, 30, 30, 30, 30, 30]
     headers = ["Jenis DBH", "Sisa KB 2023", "KB 2024", "KB Total", "Sisa LB 2023", "LB 2024", "LB Total"]
     
     pdf.set_font("Helvetica", style="B", size=10)
-    pdf.set_fill_color(217, 225, 242) # Biru Muda
+    pdf.set_fill_color(217, 225, 242)
     for i, h in enumerate(headers):
         pdf.cell(col_widths[i], 10, h, border=1, align="C", fill=True)
     pdf.ln()
     
-    # Isi Tabel
     pdf.set_font("Helvetica", size=9)
     for _, row in df_pivot.iterrows():
         pdf.cell(col_widths[0], 8, str(row['jenis_db']), border=1, align="L")
@@ -180,7 +177,7 @@ with tab1:
 with tab2:
     sub_tab1, sub_tab2 = st.tabs(["Pencarian per Provinsi", "Pencarian per Pemda/Jenis"])
     
-    # -- SUB TAB 1: Provinsi (Kode Lama) --
+    # -- SUB TAB 1: Provinsi --
     with sub_tab1:
         st.subheader("Laporan Sisa KB & LB per Provinsi")
         semua_prov = sorted(df['namaprovinsi'].dropna().unique())
@@ -241,9 +238,9 @@ with tab2:
             html += f"<td>{hasil['KB_2023'].sum():,.0f}</td><td>{hasil['KB_2024'].sum():,.0f}</td><td>{hasil['KB_Total'].sum():,.0f}</td>"
             html += f"<td>{hasil['LB_2023'].sum():,.0f}</td><td>{hasil['LB_2024'].sum():,.0f}</td><td>{hasil['LB_Total'].sum():,.0f}</td></tr></tbody></table>"
             
-            components.html(html, height=800, scrolling=True)
+            st.html(html)
 
-    # -- SUB TAB 2: Pemda/Jenis (Fitur Baru) --
+    # -- SUB TAB 2: Pemda/Jenis --
     with sub_tab2:
         st.subheader("Laporan Sisa KB & LB per Pemda (Berdasarkan Jenis DBH)")
         semua_pemda = sorted(df['pemda'].dropna().unique())
@@ -255,15 +252,10 @@ with tab2:
         if df_pemda.empty:
             st.warning("Data tidak ditemukan.")
         else:
-            # Pivot per level2
             df_pemda['jenis_kb_lb'] = np.where(df_pemda['keterangan'].str.contains('KB', na=False), 'KB',
                                       np.where(df_pemda['keterangan'].str.contains('LB', na=False), 'LB', 'Lainnya'))
             
-            # Untuk tabel ini, kita ambil tebakan otomatis tahun 2023 dan 2024
-            # karena struktur tabelnya statis (2023 dan 2024 saja)
             df_kblb = df_pemda[df_pemda['jenis_kb_lb'].isin(['KB', 'LB'])]
-            
-            # Group by level2 and tahun
             pivot = df_kblb.groupby(['level2', 'tahun', 'jenis_kb_lb'])['nilai'].sum().unstack(['tahun', 'jenis_kb_lb']).fillna(0)
             
             rows = []
@@ -285,24 +277,21 @@ with tab2:
                 st.info("Tidak ada data KB/LB untuk pemda ini pada tahun 2023/2024.")
             else:
                 df_hasil_pemda = pd.DataFrame(rows)
-                # Hitung Total
                 tot_row = {'jenis_db': 'Total'}
                 for c in ['KB_2023', 'KB_2024', 'KB_Total', 'LB_2023', 'LB_2024', 'LB_Total']:
                     tot_row[c] = df_hasil_pemda[c].sum()
                 df_hasil_pemda = pd.concat([df_hasil_pemda, pd.DataFrame([tot_row])], ignore_index=True)
                 
-                # Render HTML (Mirip Gambar)
                 css_kblb = """
                 <style>
-                .tbl-kblb { width: 100%; border-collapse: collapse; font-family: sans-serif; font-size: 13px; background-color: white; color: black; }
+                .tbl-kblb { width: 100%; border-collapse: collapse; font-family: 'Inter', sans-serif; font-size: 13px; background-color: white; color: black; }
                 .tbl-kblb th, .tbl-kblb td { border: 1px solid #000; padding: 8px; }
                 .tbl-kblb th { text-align: center; font-weight: bold; vertical-align: middle; }
                 .tbl-kblb td { text-align: right; }
                 .tbl-kblb td.text-left { text-align: left; font-weight: bold; }
-                /* Warna Header */
-                .bg-kb { background-color: #92d050; } /* Hijau */
-                .bg-lb { background-color: #9bc2e6; } /* Biru Muda */
-                .bg-title { background-color: #d9d9d9; } /* Abu */
+                .bg-kb { background-color: #92d050; }
+                .bg-lb { background-color: #9bc2e6; }
+                .bg-title { background-color: #d9d9d9; }
                 .bg-total { background-color: #d9d9d9; font-weight: bold; }
                 </style>
                 """
@@ -321,9 +310,8 @@ with tab2:
                     html_kblb += "</tr>"
                 html_kblb += "</tbody></table>"
                 
-                components.html(html_kblb, height=600, scrolling=True)
+                st.html(html_kblb)
                 
-                # Tombol Export PDF
                 pdf_bytes = generate_pdf_kblb(df_hasil_pemda, pilih_pemda, df_hasil_pemda['jenis_db'].tolist())
                 st.download_button(
                     label="⬇️ Export Tabel ke PDF",
@@ -333,7 +321,7 @@ with tab2:
                 )
 
 # ------------------------------------------
-# TAB 3: ALOKASI & REALISASI (DIPERBARUI)
+# TAB 3: ALOKASI & REALISASI
 # ------------------------------------------
 with tab3:
     st.subheader("Laporan Alokasi dan Realisasi DBH")
@@ -405,26 +393,20 @@ with tab3:
         
         df_hasil = pd.concat([df_hasil, pd.DataFrame([total_row])], ignore_index=True)
 
-        # --- RENDER HTML ---
         css = "<style>.custom-table { width: 100%; border-collapse: collapse; font-family: 'Inter', sans-serif; font-size: 11px; background-color: white; color: black; } .custom-table th, .custom-table td { border: 1px solid #000; padding: 4px 6px; } .custom-table th { background-color: #d9e1f2; text-align: center; font-weight: 700; vertical-align: middle; } .custom-table td { text-align: right; } .custom-table td.text-left { text-align: left; } .custom-table tr:nth-child(even) { background-color: #f2f2f2; } .total-row { background-color: #d9e1f2 !important; font-weight: 700; }</style>"
         
         html = css + "<table class='custom-table'><thead>"
         html += "<tr><th rowspan='3' style='width:200px;'>PEMERINTAH DAERAH</th>"
-        # Header Tahun 2025 (4 kolom)
         html += "<th colspan='4'>2025</th>"
-        # Header Tahun 2026 (3 kolom)
         html += "<th colspan='3'>2026</th>"
-        # Header Tahun 2027 (1 kolom)
         html += "<th colspan='1'>2027</th>"
         html += "</tr><tr>"
-        # Header Row 2
-        html += "<th rowspan='2'>Alokasi</th><th colspan='2'>Penyaluran</th><th rowspan='2'>Kurang Bayar</th>" # 2025
-        html += "<th rowspan='2'>Alokasi</th><th colspan='2'>Penyaluran</th>" # 2026
-        html += "<th rowspan='2'>Alokasi</th>" # 2027
+        html += "<th rowspan='2'>Alokasi</th><th colspan='2'>Penyaluran</th><th rowspan='2'>Kurang Bayar</th>"
+        html += "<th rowspan='2'>Alokasi</th><th colspan='2'>Penyaluran</th>"
+        html += "<th rowspan='2'>Alokasi</th>"
         html += "</tr><tr>"
-        # Header Row 3
-        html += "<th>Reguler</th><th>%</th>" # 2025
-        html += "<th>Reguler</th><th>%</th>" # 2026
+        html += "<th>Reguler</th><th>%</th>"
+        html += "<th>Reguler</th><th>%</th>"
         html += "</tr></thead><tbody>"
 
         for _, row in df_hasil.iterrows():
@@ -433,18 +415,14 @@ with tab3:
             style_prov = "style='font-weight:bold; background-color:#e6f0ff;'" if "Provinsi" in str(row['pemda']) else ""
             
             html += f"<tr {tr_class}><td class='text-left' {style_prov}>{row['pemda']}</td>"
-            # 2025
             html += f"<td>{row['A_2025']:,.0f}</td><td>{row['P_2025']:,.0f}</td><td>{row['Pct_2025']:.2f}%</td><td>{row['KB_2025']:,.0f}</td>"
-            # 2026
             html += f"<td>{row['A_2026']:,.0f}</td><td>{row['P_2026']:,.0f}</td><td>{row['Pct_2026']:.2f}%</td>"
-            # 2027
             html += f"<td>{row['A_2027']:,.0f}</td>"
             html += "</tr>"
         html += "</tbody></table>"
         
-        components.html(html, height=600, scrolling=True)
+        st.html(html)
         
-        # --- EXPORT PPT ---
         st.markdown("### 📥 Export Laporan ke PowerPoint")
         if st.button("Buat Slide PowerPoint (.pptx)"):
             with st.spinner("Membuat file PPT..."):
@@ -460,7 +438,6 @@ with tab3:
                 title.text_frame.paragraphs[0].font.name = 'Arial'
                 title.text_frame.paragraphs[0].alignment = PP_ALIGN.CENTER
                 
-                # Total kolom = 1 (Pemda) + 4 (2025) + 3 (2026) + 1 (2027) = 9
                 rows, cols = len(df_hasil) + 3, 9
                 shape = slide.shapes.add_table(rows, cols, Inches(0.2), Inches(1.2), Inches(12.9), Inches(5.8))
                 table = shape.table
@@ -486,7 +463,6 @@ with tab3:
                         cell.fill.solid()
                         cell.fill.fore_color.rgb = RGBColor(255, 255, 255)
 
-                # Header Row 1
                 style_cell(table.cell(0, 0), "PEMERINTAH DAERAH", is_header=True, align=PP_ALIGN.CENTER)
                 table.cell(0, 0).merge(table.cell(2, 0))
                 
@@ -496,7 +472,6 @@ with tab3:
                 table.cell(0, 5).merge(table.cell(0, 7))
                 style_cell(table.cell(0, 8), "2027", is_header=True, align=PP_ALIGN.CENTER)
                 
-                # Header Row 2
                 style_cell(table.cell(1, 1), "Alokasi", is_header=True, align=PP_ALIGN.CENTER)
                 table.cell(1, 1).merge(table.cell(2, 1))
                 
@@ -515,13 +490,11 @@ with tab3:
                 style_cell(table.cell(1, 8), "Alokasi", is_header=True, align=PP_ALIGN.CENTER)
                 table.cell(1, 8).merge(table.cell(2, 8))
                 
-                # Header Row 3
                 style_cell(table.cell(2, 2), "Reguler", is_header=True, align=PP_ALIGN.CENTER)
                 style_cell(table.cell(2, 3), "%", is_header=True, align=PP_ALIGN.CENTER)
                 style_cell(table.cell(2, 6), "Reguler", is_header=True, align=PP_ALIGN.CENTER)
                 style_cell(table.cell(2, 7), "%", is_header=True, align=PP_ALIGN.CENTER)
                 
-                # Isi
                 for r_idx, row_data in df_hasil.iterrows():
                     excel_row = r_idx + 3
                     is_total = row_data['pemda'] == 'JUMLAH'
