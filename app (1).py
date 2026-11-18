@@ -7,40 +7,128 @@ import streamlit.components.v1 as components
 import io
 from pptx import Presentation
 from pptx.util import Inches, Pt
+from pptx.dml.color import RGBColor
+from pptx.enum.text import PP_ALIGN
 import os
 import gzip
 import shutil
 
 # ==========================================
-# KODE OTOMATIS EKSTRAK DATABASE (.gz ke .db)
+# 1. KONFIGURASI HALAMAN & UI/UX (Dark Mode)
 # ==========================================
-if not os.path.exists('database_dbh.db'):
-    if os.path.exists('database_dbh.db.gz'):
-        with gzip.open('database_dbh.db.gz', 'rb') as f_in:
-            with open('database_dbh.db', 'wb') as f_out:
-                shutil.copyfileobj(f_in, f_out)
-    else:
-        st.error("File database tidak ditemukan! Pastikan database_dbh.db.gz sudah diunggah.")
+st.set_page_config(page_title="RevShare 1.0", layout="wide", page_icon="🚀")
+
+# Custom CSS untuk mempercantik UI
+st.markdown("""
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+    
+    html, body, [class*="css"] {
+        font-family: 'Inter', sans-serif;
+    }
+    h1, h2, h3 {
+        font-weight: 700;
+        color: #ffffff;
+    }
+    .stTabs [data-baseweb="tab-list"] button {
+        font-size: 16px;
+        font-weight: 600;
+        padding: 10px 20px;
+        border-radius: 10px 10px 0 0;
+    }
+    .stButton>button {
+        border-radius: 8px;
+        font-weight: 600;
+        transition: all 0.3s ease;
+    }
+    .stButton>button:hover {
+        transform: scale(1.02);
+    }
+</style>
+""", unsafe_allow_html=True)
+
+st.title("🚀 RevShare 1.0")
 
 # ==========================================
-# APLIKASI UTAMA
+# 2. OTOMATIS EKSTRAK DATABASE & UPLOAD CSV
 # ==========================================
-st.set_page_config(page_title="Dashboard DBH", layout="wide")
-st.title("📊 Dashboard DBH")
-
 DB = 'database_dbh.db'
 
-@st.cache_data(show_spinner="Memuat data...")
-def load_data():
-    cols = ['tahun','siklus','namaprovinsi','pemda', 'level0','keterangan', 'nilai']
-    conn = sqlite3.connect(DB)
-    df = pd.read_sql_query(f"SELECT {','.join(cols)} FROM database_utama", conn)
-    conn.close()
-    df['tahun'] = pd.to_numeric(df['tahun'], errors='coerce').fillna(0).astype(int)
-    return df
+# Ekstrak .gz jika .db belum ada
+if not os.path.exists(DB):
+    if os.path.exists(DB + '.gz'):
+        with gzip.open(DB + '.gz', 'rb') as f_in:
+            with open(DB, 'wb') as f_out:
+                shutil.copyfileobj(f_in, f_out)
+    else:
+        st.error("File database tidak ditemukan!")
 
-df = load_data()
+# Inisialisasi session state untuk data
+if 'data_updated' not in st.session_state:
+    @st.cache_data(show_spinner="Memuat data...")
+    def load_data():
+        conn = sqlite3.connect(DB)
+        df = pd.read_sql_query("SELECT * FROM database_utama", conn)
+        conn.close()
+        df['tahun'] = pd.to_numeric(df['tahun'], errors='coerce').fillna(0).astype(int)
+        return df
+    st.session_state['data_updated'] = load_data()
 
+df = st.session_state['data_updated']
+
+# --- SIDEBAR: FITUR UPLOAD ---
+st.sidebar.header("📤 Upload Data Baru")
+uploaded_file = st.sidebar.file_uploader("Pilih file CSV atau Excel", type=['csv', 'xlsx'])
+
+if uploaded_file is not None:
+    if st.sidebar.button("Proses Upload"):
+        try:
+            if uploaded_file.name.endswith('.csv'):
+                new_data = pd.read_csv(uploaded_file)
+            else:
+                new_data = pd.read_excel(uploaded_file)
+            
+            # Validasi kolom
+            required_cols = ['siklus', 'pemda', 'uraian4', 'nilai', 'tanggal', 'tahun']
+            if not all(col in new_data.columns for col in required_cols):
+                st.sidebar.error(f"Kolom tidak lengkap! Harus ada: {', '.join(required_cols)}")
+            else:
+                # Konversi tipe data
+                new_data['nilai'] = pd.to_numeric(new_data['nilai'], errors='coerce')
+                new_data['tahun'] = pd.to_numeric(new_data['tahun'], errors='coerce').fillna(0).astype(int)
+                
+                # Gabungkan (Append)
+                df_combined = pd.concat([df, new_data], ignore_index=True)
+                # Hapus duplikat jika ada (berdasarkan siklus, pemda, uraian4, tahun)
+                df_combined = df_combined.drop_duplicates(subset=['siklus', 'pemda', 'uraian4', 'tahun'], keep='last')
+                
+                st.session_state['data_updated'] = df_combined
+                df = df_combined
+                
+                # Update DB SQLite sementara
+                conn = sqlite3.connect(DB)
+                df.to_sql('database_utama', conn, if_exists='replace', index=False)
+                conn.close()
+                
+                st.sidebar.success("✅ Data berhasil ditambahkan!")
+                st.sidebar.info("💡 Agar permanen, unduh file DB di bawah dan ganti file .db.gz di GitHub.")
+        except Exception as e:
+            st.sidebar.error(f"Error: {e}")
+
+# Tombol unduh database terbaru (jika ada update)
+if os.path.exists(DB):
+    with open(DB, 'rb') as f:
+        st.sidebar.download_button(
+            label="⬇️ Unduh Database Terbaru (.db)",
+            data=f,
+            file_name="database_dbh_terbaru.db",
+            mime="application/x-sqlite3",
+            help="Upload file ini ke GitHub (ganti yang lama) agar perubahan permanen."
+        )
+
+# ==========================================
+# 3. TABS & KONTEN
+# ==========================================
 tab1, tab2, tab3, tab4 = st.tabs([
     "📈 Visualisasi Chart", 
     "📄 Laporan Tabel (KB/LB)", 
@@ -55,7 +143,9 @@ with tab1:
     st.subheader("Visualisasi Chart")
     grup = st.selectbox("Kelompokkan per", ['level0','level1','namaprovinsi'], key='grup_chart')
     agg = df.groupby(grup, as_index=False)['nilai'].sum().sort_values('nilai', ascending=False).head(15)
-    st.plotly_chart(px.bar(agg, x='nilai', y=grup, orientation='h'), use_container_width=True)
+    fig = px.bar(agg, x='nilai', y=grup, orientation='h', template='plotly_dark')
+    fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+    st.plotly_chart(fig, use_container_width=True)
 
 # ------------------------------------------
 # TAB 2: TABEL KBLB
@@ -107,7 +197,8 @@ with tab2:
         hasil['LB_Total'] = hasil['LB_2023'] + hasil['LB_2024']
         hasil.insert(0, 'No', range(1, len(hasil) + 1))
 
-        css = "<style>.custom-table { width: 100%; border-collapse: collapse; font-family: sans-serif; font-size: 13px; background-color: white; color: black; } .custom-table th, .custom-table td { border: 1px solid #000; padding: 6px 8px; } .custom-table th { background-color: #d9e1f2; text-align: center; font-weight: bold; vertical-align: middle; } .custom-table td { text-align: right; } .custom-table td.text-left { text-align: left; } .custom-table tr:nth-child(even) { background-color: #f2f2f2; } .total-row { background-color: #d9e1f2 !important; font-weight: bold; }</style>"
+        # Tampilan HTML Tabel
+        css = "<style>.custom-table { width: 100%; border-collapse: collapse; font-family: 'Inter', sans-serif; font-size: 13px; background-color: white; color: black; } .custom-table th, .custom-table td { border: 1px solid #000; padding: 6px 8px; } .custom-table th { background-color: #d9e1f2; text-align: center; font-weight: 700; vertical-align: middle; } .custom-table td { text-align: right; } .custom-table td.text-left { text-align: left; } .custom-table tr:nth-child(even) { background-color: #f2f2f2; } .total-row { background-color: #d9e1f2 !important; font-weight: 700; }</style>"
         
         html = css + "<table class='custom-table'><thead>"
         html += "<tr><th rowspan='3'>No</th><th rowspan='3'>Pemerintah Daerah</th><th colspan='3'>Kurang Bayar</th><th colspan='3'>Lebih Bayar</th></tr>"
@@ -125,7 +216,6 @@ with tab2:
         html += f"<td>{hasil['LB_2023'].sum():,.0f}</td><td>{hasil['LB_2024'].sum():,.0f}</td><td>{hasil['LB_Total'].sum():,.0f}</td></tr></tbody></table>"
         
         components.html(html, height=800, scrolling=True)
-        st.download_button("⬇️ Download Tabel KB/LB (CSV)", data=hasil.to_csv(index=False).encode('utf-8'), file_name=f"KB_LB_{pilih_prov_kblb}.csv", mime="text/csv")
 
 # ------------------------------------------
 # TAB 3: ALOKASI & REALISASI + PPT
@@ -200,7 +290,8 @@ with tab3:
         
         df_hasil = pd.concat([df_hasil, pd.DataFrame([total_row])], ignore_index=True)
 
-        css = "<style>.custom-table { width: 100%; border-collapse: collapse; font-family: sans-serif; font-size: 11px; background-color: white; color: black; } .custom-table th, .custom-table td { border: 1px solid #000; padding: 4px 6px; } .custom-table th { background-color: #d9e1f2; text-align: center; font-weight: bold; vertical-align: middle; } .custom-table td { text-align: right; } .custom-table td.text-left { text-align: left; } .custom-table tr:nth-child(even) { background-color: #f2f2f2; } .total-row { background-color: #d9e1f2 !important; font-weight: bold; }</style>"
+        # Tampilan HTML
+        css = "<style>.custom-table { width: 100%; border-collapse: collapse; font-family: 'Inter', sans-serif; font-size: 11px; background-color: white; color: black; } .custom-table th, .custom-table td { border: 1px solid #000; padding: 4px 6px; } .custom-table th { background-color: #d9e1f2; text-align: center; font-weight: 700; vertical-align: middle; } .custom-table td { text-align: right; } .custom-table td.text-left { text-align: left; } .custom-table tr:nth-child(even) { background-color: #f2f2f2; } .total-row { background-color: #d9e1f2 !important; font-weight: 700; }</style>"
         
         html = css + "<table class='custom-table'><thead>"
         html += "<tr><th rowspan='3'>PEMERINTAH DAERAH</th>"
@@ -224,64 +315,99 @@ with tab3:
         
         components.html(html, height=600, scrolling=True)
         
+        # --- PERBAIKAN EXPORT PPT ---
         st.markdown("### 📥 Export Laporan ke PowerPoint")
         if st.button("Buat Slide PowerPoint (.pptx)"):
-            with st.spinner("Membuat file PPT..."):
+            with st.spinner("Membuat file PPT yang rapi..."):
                 prs = Presentation()
-                slide = prs.slides.add_slide(prs.slide_layouts[5])
+                # Set ukuran slide ke Widescreen (16:9)
+                prs.slide_width = Inches(13.333)
+                prs.slide_height = Inches(7.5)
                 
+                slide = prs.slides.add_slide(prs.slide_layouts[5]) # Title Only
+                
+                # Judul
                 title = slide.shapes.title
                 title.text = "ALOKASI DAN REALISASI DBH"
-                title.text_frame.paragraphs[0].font.size = Pt(18)
+                title.text_frame.paragraphs[0].font.size = Pt(24)
                 title.text_frame.paragraphs[0].font.bold = True
+                title.text_frame.paragraphs[0].font.name = 'Arial'
+                title.text_frame.paragraphs[0].alignment = PP_ALIGN.CENTER
                 
                 rows, cols = len(df_hasil) + 3, 1 + (len(list_tahun) * 4)
-                shape = slide.shapes.add_table(rows, cols, Inches(0.2), Inches(1.2), Inches(13.0), Inches(5.5))
+                left, top, width, height = Inches(0.2), Inches(1.2), Inches(12.9), Inches(5.8)
+                
+                shape = slide.shapes.add_table(rows, cols, left, top, width, height)
                 table = shape.table
                 
-                for r in range(rows):
-                    for c in range(cols):
-                        cell = table.cell(r, c)
-                        cell.text_frame.paragraphs[0].font.size = Pt(9)
-                        cell.margin_left, cell.margin_right, cell.margin_top, cell.margin_bottom = Inches(0.02), Inches(0.02), Inches(0.02), Inches(0.02)
+                # Atur lebar kolom proporsional
+                table.columns[0].width = Inches(2.5)
+                for i in range(1, cols):
+                    table.columns[i].width = Inches((12.9 - 2.5) / (cols - 1))
                 
-                table.cell(0, 0).text = "PEMERINTAH DAERAH"
+                # Helper untuk mewarnai sel dan memberi border
+                def style_cell(cell, text, is_header=False, is_total=False, align=PP_ALIGN.RIGHT, bg_color=None):
+                    cell.text = str(text)
+                    cell.text_frame.paragraphs[0].font.size = Pt(10)
+                    cell.text_frame.paragraphs[0].font.name = 'Arial'
+                    cell.text_frame.paragraphs[0].alignment = align
+                    cell.vertical_anchor = 3 # MIDDLE
+                    
+                    if is_header or is_total:
+                        cell.fill.solid()
+                        cell.fill.fore_color.rgb = RGBColor(217, 225, 242) # Biru muda #D9E1F2
+                        cell.text_frame.paragraphs[0].font.bold = True
+                    elif bg_color:
+                        cell.fill.solid()
+                        cell.fill.fore_color.rgb = bg_color
+                    else:
+                        cell.fill.solid()
+                        cell.fill.fore_color.rgb = RGBColor(255, 255, 255)
+
+                # Header Row 1 & 2 & 3
+                style_cell(table.cell(0, 0), "PEMERINTAH DAERAH", is_header=True, align=PP_ALIGN.CENTER)
                 table.cell(0, 0).merge(table.cell(2, 0))
                 
                 col_idx = 1
                 for thn in list_tahun:
-                    table.cell(0, col_idx).text = str(thn)
+                    style_cell(table.cell(0, col_idx), str(thn), is_header=True, align=PP_ALIGN.CENTER)
                     table.cell(0, col_idx).merge(table.cell(0, col_idx + 3))
                     
-                    table.cell(1, col_idx).text = "Alokasi"
+                    style_cell(table.cell(1, col_idx), "Alokasi", is_header=True, align=PP_ALIGN.CENTER)
                     table.cell(1, col_idx).merge(table.cell(2, col_idx))
                     
-                    table.cell(1, col_idx+1).text = "Penyaluran"
+                    style_cell(table.cell(1, col_idx+1), "Penyaluran", is_header=True, align=PP_ALIGN.CENTER)
                     table.cell(1, col_idx+1).merge(table.cell(1, col_idx+2))
                     
-                    table.cell(2, col_idx+1).text = "Reguler"
-                    table.cell(2, col_idx+2).text = "%"
+                    style_cell(table.cell(2, col_idx+1), "Reguler", is_header=True, align=PP_ALIGN.CENTER)
+                    style_cell(table.cell(2, col_idx+2), "%", is_header=True, align=PP_ALIGN.CENTER)
                     
-                    table.cell(1, col_idx+3).text = "Kurang Bayar"
+                    style_cell(table.cell(1, col_idx+3), "Kurang Bayar", is_header=True, align=PP_ALIGN.CENTER)
                     table.cell(1, col_idx+3).merge(table.cell(2, col_idx+3))
                     col_idx += 4
                 
+                # Isi Data
                 for r_idx, row_data in df_hasil.iterrows():
                     excel_row = r_idx + 3
-                    table.cell(excel_row, 0).text = str(row_data['pemda'])
+                    is_total = row_data['pemda'] == 'JUMLAH'
+                    is_prov = "Provinsi" in str(row_data['pemda'])
+                    bg_color = RGBColor(230, 240, 255) if is_prov and not is_total else None
+                    
+                    style_cell(table.cell(excel_row, 0), row_data['pemda'], is_total=is_total, align=PP_ALIGN.LEFT, bg_color=bg_color)
+                    
                     col_idx = 1
                     for thn in list_tahun:
-                        table.cell(excel_row, col_idx).text = f"{row_data[f'A_{thn}']:,.0f}"
-                        table.cell(excel_row, col_idx+1).text = f"{row_data[f'P_{thn}']:,.0f}"
-                        table.cell(excel_row, col_idx+2).text = f"{row_data[f'Pct_{thn}']:.2f}%"
-                        table.cell(excel_row, col_idx+3).text = f"{row_data[f'KB_{thn}']:,.0f}"
+                        style_cell(table.cell(excel_row, col_idx), f"{row_data[f'A_{thn}']:,.0f}", is_total=is_total, bg_color=bg_color)
+                        style_cell(table.cell(excel_row, col_idx+1), f"{row_data[f'P_{thn}']:,.0f}", is_total=is_total, bg_color=bg_color)
+                        style_cell(table.cell(excel_row, col_idx+2), f"{row_data[f'Pct_{thn}']:.2f}%", is_total=is_total, bg_color=bg_color)
+                        style_cell(table.cell(excel_row, col_idx+3), f"{row_data[f'KB_{thn}']:,.0f}", is_total=is_total, bg_color=bg_color)
                         col_idx += 4
                 
                 ppt_stream = io.BytesIO()
                 prs.save(ppt_stream)
                 ppt_stream.seek(0)
                 
-                st.success("✅ File PPT berhasil dibuat!")
+                st.success("✅ File PPT berhasil dibuat dengan format yang rapi!")
                 st.download_button("⬇️ Download File PPT", data=ppt_stream, file_name=f"Alokasi_Realisasi_{pilih_prov_ar}.pptx", mime="application/vnd.openxmlformats-officedocument.presentationml.presentation")
 
 # ------------------------------------------
